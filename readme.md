@@ -8,34 +8,6 @@
 
 王爽老师的书籍是在`8086CPU`上编写的. 纯粹的`8086CPU`现在已经不存在了, 但是任何一台和Intel系列兼容的pc机都可以8086的方式进行工作(可以当做一台高速的8086PC)
 
-## 环境搭建
-
-### windows
-新版本的windows系统已经不在内置`debug`程序了, 所以windows环境搭建可以参考[win10配置汇编语言环境（王爽汇编语言环境](https://blog.csdn.net/qq_19782019/article/details/88913885)
-
-
-### macos
-
-1. 下载汇编依赖包
-汇编依赖包主要包括`debug.exe`, `link.exe`, `lib.exe`等. 正常来讲, 在微软官方应该是有这些基础包的下载链接. 这里为了方便, 没有逐一去寻找, 直接下载使用
-
-> 最开始的实验值需要`debug.exe`就可以了.
-
-2. 下载`dosbox`
-
-在[官网下载链接](https://www.dosbox.com/download.php?main=1)中选择最新版下载到本地安装
-
-
-3. 设置启动参数
-
-打开`dosbox`的偏好设置
-
-在末尾`[autoexec]`板块后添加启动代码(省去每次手动输入去启动debug程序的重复步骤)
-```shell
-[autoexec]
-# Lines in this section will be run at startup.
-# You can put your MOUNT lines here.
-mount c ~/projects/km7/asm-env/masm5
-c:
-debug
-```
+0. [环境搭建](./doc/00-环境搭建)
+1. [基础知识](./doc/01-基础知识)
+2. [寄存器](./doc/02-寄存器)
