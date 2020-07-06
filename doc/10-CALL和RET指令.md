@@ -501,6 +501,203 @@ code ends
 end start
 
 ```
+show_str:
+```s
+assume cs:code
+code segment
+show_str: push ds
+          push si
+          push dx
+          push cx
+          push ax
+          push es
+          push bx
+
+          mov ax,0b800h
+          mov es,ax               ;显示缓冲区的起始地址
+          mov al,160
+          mul dh                  ;8位乘法, 计算行列
+          mov bx,ax
+          mov al,2
+          mul dl
+          add bx,ax               ;以上代码是存储初始偏移地址
+
+    run:  push cx
+          mov cl, [si]
+          mov ch, 0
+          jcxz ok
+          pop cx
+          mov al,[si]
+          mov ah, cl               ;构造 颜色属性
+          push si
+          add si, si
+          mov es:[bx].0h[si],ax    ;写入显示缓冲区
+          pop si
+          inc si
+          jmp short run
+      
+      ok: pop cx
+          pop bx
+          pop es
+          pop ax
+          pop cx
+          pop dx
+          pop si
+          pop ds         ;还原寄存器
+          ret
+code ends
+end
+
+```
 在第8行3列中输入绿色字符串:
 
 ![](../snapshots/10.a2.png)
+
+2. 解决除法溢出问题
+
+在用div指令做除法时,如果结果的商过大, 超出了寄存器所能存储的范围, 将引发cup的一个内部错误, 这个错误称为**除法溢出**
+```s
+mov bh,1
+mov ax,1000
+div bh
+; 进行8位除法, 结果的商为1000, 而1000在al中放不下
+```
+
+子程序描述:
+- 名称: divdw
+- 功能: 进行不会产生溢出的除法运算, 被除数为`dword`型, 除数为`word`型, 结果为`dword`型
+- 参数
+    - (ax)=dword型数据的低16位
+    - (dx)=dword型数据的高16位
+    - (cx)=除数
+- 返回
+    - (dx)=结果的高16位, (ax)=结果的低16位, (cx)=余数
+
+提示: 为了防止溢出, 可以使用一个数学公式
+```
+X:被除数, 范围: [0, ffffffff] 4字节
+N:除数, 范围: [0, ffff] 2字节
+H:X高16位, 范围: [0, ffff] 2字节
+L:X低16位, 范围: [0, ffff] 2字节
+int(): 描述性运算符, 取商, 比如, int(38/10)=3
+rem(): 描述性运算符, 取余数, 比如, rem(38/10)=8
+
+公式: X/N=int(H/N)*65536 + [rem(H/N)*65536 + L]/N
+```
+这个公式将可能产生溢出的除法运算(X/N)转变为多个不会产生溢出的除法运算. 公式中等号右边的除法都可以用div指令, 肯定不会导致除法溢出
+
+计算`1000000/10(f4240h/0ah)`
+
+分析: 将初始寄存器中的参数, 带入公式中进行计算, 保留在结果寄存器中
+```s
+assume cs:code
+divdw:push bx      ;入栈将要使用到的寄存器
+      push ax      ;保存(ax)=dword型数据的低16位
+      mov ax,dx    ;把高16位移到低16位的位置上
+      mov dx,0     ;清空高16位
+      div cx       ;计算 (ax) = int(H/N), (dx)=rem(H/N)
+      
+      pop bx       ;出栈, (bx)=dword型数据的低16位
+      push ax      ;保存int(H/N)
+
+      mov ax,bx    ;(ax)=dword型数据的低16位
+      div cx       ;计算[rem(H/N)*65536 + L]/N. 得到结果: (ax)=最终商的低16位
+      mov cx,dx    ;得到结果: (cx)=余数
+      pop dx       ;出栈int(H/N), 得到结果: (dx)=最终商的高16位
+
+      pop bx       ;还原bx
+      ret          ;返回
+code ends
+end
+```
+```s
+assume cs:code
+
+code segment
+  start: mov ax,4240h
+         mov dx,000fh
+         mov cx,0ah
+         call divdw
+         
+         mov ax,4c00h
+         int 21h
+code ends
+
+end start
+```
+
+3. 数值显示
+编程, 将data段中的数据以十进制的形式显示出来. 如将数据12666以十进制的形式在屏幕的8行3列, 用绿色显示出来.
+
+```s
+data segment
+  dw 123,12666,1,8,3,38
+data ends
+```
+
+分析: 
+1. 由于显卡遵循的是ASCII编码, 为了在显示器上看到"12666", 那么在机器中应该以ASCII码的形式存储: `31h, 32h, 36h, 36h, 36h`
+2. 将用二进制信息存储的数据转变为十进制形式的字符串
+3. 调用以前实现的`show_str`可以将其显示出来
+
+
+子程序描述:
+- 名称: dtoc
+- 功能: 将word型数据转变为表示十进制的字符串, 字符串以0位结尾符
+- 参数: (ax)=word型数据, ds:si指向字符串的首地址
+- 返回: 无
+
+
+```s
+assume cs:code
+data segment
+  db 10 dup (0)
+data ends
+
+code segment
+  start: mov ax,12666
+         mov bx,data
+         mov ds,bx
+         mov si,0
+
+         call dtoc
+
+         mov dh,8
+         mov dl,3
+         mov cl,2
+         call show_str
+
+         mov ax, 4c00h
+         mov int 21h
+code ends
+
+end start
+```
+
+```s
+assume cs:code
+
+code segment
+  dtoc:push ax
+       push si
+       push cx
+       
+       mov dx,0
+
+    s: mov cx,10          ;除数定义为10, 被除数低16位默认放在ax中
+       call divdw
+       mov ds[si], cl     ;保存余数到ds段中
+       mov cx,ax          ;把商保存到cx中
+       jcxz ok            ;如果商为0, 转移到标号ok
+       
+       inc si             ;偏移+1
+       loop s
+
+    ok:pop cx
+       pop si
+       pop ax             ;还原使用到的寄存器
+       ret
+code ends
+
+end
+```
