@@ -456,7 +456,6 @@ code segment
           call show_str
           mov ax,4c00h
           int 21h
-
 show_str: push ds
           push si
           push dx
@@ -501,54 +500,6 @@ code ends
 end start
 
 ```
-show_str:
-```s
-assume cs:code
-code segment
-show_str: push ds
-          push si
-          push dx
-          push cx
-          push ax
-          push es
-          push bx
-
-          mov ax,0b800h
-          mov es,ax               ;显示缓冲区的起始地址
-          mov al,160
-          mul dh                  ;8位乘法, 计算行列
-          mov bx,ax
-          mov al,2
-          mul dl
-          add bx,ax               ;以上代码是存储初始偏移地址
-
-    run:  push cx
-          mov cl, [si]
-          mov ch, 0
-          jcxz ok
-          pop cx
-          mov al,[si]
-          mov ah, cl               ;构造 颜色属性
-          push si
-          add si, si
-          mov es:[bx].0h[si],ax    ;写入显示缓冲区
-          pop si
-          inc si
-          jmp short run
-      
-      ok: pop cx
-          pop bx
-          pop es
-          pop ax
-          pop cx
-          pop dx
-          pop si
-          pop ds         ;还原寄存器
-          ret
-code ends
-end
-
-```
 在第8行3列中输入绿色字符串:
 
 ![](../snapshots/10.a2.png)
@@ -589,8 +540,19 @@ rem(): 描述性运算符, 取余数, 比如, rem(38/10)=8
 计算`1000000/10(f4240h/0ah)`
 
 分析: 将初始寄存器中的参数, 带入公式中进行计算, 保留在结果寄存器中
+
 ```s
 assume cs:code
+
+code segment
+  start: mov ax,4240h
+         mov dx,000fh
+         mov cx,0ah
+         call divdw
+         
+         mov ax,4c00h
+         int 21h
+
 divdw:push bx      ;入栈将要使用到的寄存器
       push ax      ;保存(ax)=dword型数据的低16位
       mov ax,dx    ;把高16位移到低16位的位置上
@@ -607,20 +569,6 @@ divdw:push bx      ;入栈将要使用到的寄存器
 
       pop bx       ;还原bx
       ret          ;返回
-code ends
-end
-```
-```s
-assume cs:code
-
-code segment
-  start: mov ax,4240h
-         mov dx,000fh
-         mov cx,0ah
-         call divdw
-         
-         mov ax,4c00h
-         int 21h
 code ends
 
 end start
@@ -665,39 +613,107 @@ code segment
          mov dh,8
          mov dl,3
          mov cl,2
+         mov ch,0         ;保证高8位为0
          call show_str
 
          mov ax, 4c00h
-         mov int 21h
-code ends
-
-end start
-```
-
-```s
-assume cs:code
-
-code segment
+         int 21h
+;----
+; dtoc 将数字转换成字符串
+;-----
   dtoc:push ax
        push si
        push cx
-       
-       mov dx,0
 
-    s: mov cx,10          ;除数定义为10, 被除数低16位默认放在ax中
-       call divdw
-       mov ds[si], cl     ;保存余数到ds段中
-       mov cx,ax          ;把商保存到cx中
-       jcxz ok            ;如果商为0, 转移到标号ok
-       
-       inc si             ;偏移+1
-       loop s
+dtoc_s: mov cx,10           ;除数定义为10, 被除数低16位默认放在ax中
+        call divdw
+        add cx,30h          ;将余数+30h, 转换成数字对应的ASCII码
+        ;mov [si],cx        ;把ASCII保存余数到ds段中
+        push cx             ;将结果暂存到栈里面, 随后在pop到ds段位置, 能保证数字的顺序(只要低位, 高位会在pop的时候忽略)
+        mov cx,ax           ;把商保存到cx中
+        inc si              ;偏移+1
 
-    ok:pop cx
-       pop si
-       pop ax             ;还原使用到的寄存器
-       ret
+        jcxz dtoc_save      ;如果商为0, 转移到标号ok
+
+        jmp short dtoc_s    ;无条件转移dtoc_s处继续分解ax中的参数
+
+dtoc_save: mov cx,si
+           mov si,0
+  dtoc_s1: pop ds:[si]          ;倒序送入到ds段中
+           inc si
+           loop dtoc_s1
+
+dtoc_ok:pop cx
+        pop si
+        pop ax              ;还原使用到的寄存器
+        ret
+
+;----
+; divdw 非溢出除法
+;-----
+divdw:push bx      ;入栈将要使用到的寄存器
+      push ax      ;保存(ax)=dword型数据的低16位
+      mov ax,dx    ;把高16位移到低16位的位置上
+      mov dx,0     ;清空高16位
+      div cx       ;计算 (ax) = int(H/N), (dx)=rem(H/N)
+      
+      pop bx       ;出栈, (bx)=dword型数据的低16位
+      push ax      ;保存int(H/N)
+
+      mov ax,bx    ;(ax)=dword型数据的低16位
+      div cx       ;计算[rem(H/N)*65536 + L]/N. 得到结果: (ax)=最终商的低16位
+      mov cx,dx    ;得到结果: (cx)=余数
+      pop dx       ;出栈int(H/N), 得到结果: (dx)=最终商的高16位
+
+      pop bx       ;还原bx
+      ret          ;返回
+
+
+;----
+; show_str 将字符串写入显存
+;-----
+show_str: push ds
+          push si
+          push dx
+          push cx
+          push ax
+          push es
+          push bx
+
+          mov ax,0b800h
+          mov es,ax               ;显示缓冲区的起始地址
+          mov al,160
+          mul dh                  ;8位乘法, 计算行列
+          mov bx,ax
+          mov al,2
+          mul dl
+          add bx,ax               ;以上代码是存储初始偏移地址
+
+show_str_run:  push cx
+          mov cl, [si]
+          mov ch, 0
+          jcxz show_str_ok
+          pop cx
+          mov al,[si]
+          mov ah, cl               ;构造 颜色属性
+          push si
+          add si, si
+          mov es:[bx].0h[si],ax    ;写入显示缓冲区
+          pop si
+          inc si
+          jmp short show_str_run
+      
+show_str_ok: pop cx
+          pop bx
+          pop es
+          pop ax
+          pop cx
+          pop dx
+          pop si
+          pop ds         ;还原寄存器
+          ret
+
 code ends
 
-end
+end start
 ```
